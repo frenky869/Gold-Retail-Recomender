@@ -3,11 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
-import geopy.distance
-import requests
-import json
+import math
 
 # Page configuration
 st.set_page_config(
@@ -47,11 +44,28 @@ st.markdown("""
 
 class GoldRetailRecommender:
     def __init__(self):
-        self.retailers_data = self.load_sample_data()
         self.nyatike_coords = (-0.8996, 34.2986)  # Nyatike Gold Mine coordinates
+        self.retailers_data = self.load_sample_data()
+        
+    def calculate_distance(self, lat1, lon1, lat2, lon2):
+        """Calculate distance between two coordinates using Haversine formula"""
+        R = 6371  # Earth radius in kilometers
+        
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
         
     def load_sample_data(self):
-        """Load sample retailer data - in real scenario, this would be from a database"""
+        """Load sample retailer data"""
         data = {
             'retailer_id': range(1, 21),
             'name': [
@@ -69,10 +83,14 @@ class GoldRetailRecommender:
                 'Kakamega', 'Bungoma', 'Busia', 'Homabay', 'Migori', 'Siaya',
                 'Vihiga', 'Narok'
             ],
-            'price_per_gram': np.random.uniform(5500, 7500, 20),  # KSH per gram
-            'purchase_capacity_kg': np.random.uniform(1, 50, 20),  # kg capacity
-            'trust_rating': np.random.uniform(3.5, 5.0, 20),  # 1-5 scale
-            'years_in_business': np.random.randint(1, 30, 20),
+            'price_per_gram': [7200, 7100, 6900, 6800, 7000, 6950, 7050, 6850, 6750, 6950,
+                             7100, 6650, 6800, 6700, 6750, 6850, 6900, 6700, 6800, 6950],
+            'purchase_capacity_kg': [45, 35, 25, 20, 30, 28, 32, 22, 18, 26, 
+                                   38, 15, 24, 19, 21, 23, 27, 17, 20, 29],
+            'trust_rating': [4.8, 4.7, 4.5, 4.3, 4.6, 4.4, 4.5, 4.2, 4.1, 4.3,
+                           4.7, 4.0, 4.3, 4.1, 4.2, 4.4, 4.5, 4.0, 4.2, 4.6],
+            'years_in_business': [25, 20, 15, 12, 18, 14, 16, 10, 8, 13, 
+                                22, 6, 11, 9, 10, 13, 15, 7, 9, 17],
             'certification': ['LBMA', 'ISO', 'Local', 'LBMA', 'ISO', 'Local', 'LBMA', 
                             'ISO', 'Local', 'LBMA', 'ISO', 'Local', 'LBMA', 'ISO', 
                             'Local', 'LBMA', 'ISO', 'Local', 'LBMA', 'ISO'],
@@ -91,11 +109,13 @@ class GoldRetailRecommender:
         }
         
         df = pd.DataFrame(data)
-        # Calculate distances from Nyatike
+        
+        # Calculate distances from Nyatike using our custom function
         df['distance_km'] = df.apply(
-            lambda row: geopy.distance.distance(
-                self.nyatike_coords, (row['latitude'], row['longitude'])
-            ).km, axis=1
+            lambda row: self.calculate_distance(
+                self.nyatike_coords[0], self.nyatike_coords[1],
+                row['latitude'], row['longitude']
+            ), axis=1
         )
         
         return df
@@ -191,47 +211,56 @@ def main():
         st.markdown("### 🗺️ Retailer Locations")
         
         # Create map
-        fig = px.scatter_mapbox(
-            recommender.retailers_data,
-            lat="latitude",
-            lon="longitude",
-            hover_name="name",
-            hover_data={
-                "price_per_gram": True,
-                "trust_rating": True,
-                "distance_km": True,
-                "city": True
-            },
-            color="trust_rating",
-            size="purchase_capacity_kg",
-            color_continuous_scale="viridis",
-            zoom=6,
-            height=500
-        )
-        
-        # Add Nyatike mine location
-        fig.add_trace(px.scatter_mapbox(
-            pd.DataFrame({
-                'lat': [recommender.nyatike_coords[0]],
-                'lon': [recommender.nyatike_coords[1]],
-                'name': ['Nyatike Gold Mine']
-            }),
-            lat="lat",
-            lon="lon",
-            hover_name="name"
-        ).data[0])
-        
-        fig.update_traces(
-            marker=dict(size=20, symbol="diamond", color="red"),
-            selector=dict(name="Nyatike Gold Mine")
-        )
-        
-        fig.update_layout(
-            mapbox_style="open-street-map",
-            margin={"r":0,"t":0,"l":0,"b":0}
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            fig = px.scatter_mapbox(
+                recommender.retailers_data,
+                lat="latitude",
+                lon="longitude",
+                hover_name="name",
+                hover_data={
+                    "price_per_gram": True,
+                    "trust_rating": True,
+                    "distance_km": True,
+                    "city": True
+                },
+                color="trust_rating",
+                size="purchase_capacity_kg",
+                color_continuous_scale="viridis",
+                zoom=6,
+                height=500
+            )
+            
+            # Add Nyatike mine location
+            mine_data = pd.DataFrame({
+                'latitude': [recommender.nyatike_coords[0]],
+                'longitude': [recommender.nyatike_coords[1]],
+                'name': ['Nyatike Gold Mine'],
+                'trust_rating': [5.0],
+                'purchase_capacity_kg': [10]
+            })
+            
+            fig.add_trace(px.scatter_mapbox(
+                mine_data,
+                lat="latitude",
+                lon="longitude",
+                hover_name="name"
+            ).data[0])
+            
+            fig.update_traces(
+                marker=dict(size=20, symbol="diamond", color="red"),
+                selector=dict(name="Nyatike Gold Mine")
+            )
+            
+            fig.update_layout(
+                mapbox_style="open-street-map",
+                margin={"r":0,"t":0,"l":0,"b":0}
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Map not available: {str(e)}")
+            st.info("Displaying retailer list instead:")
+            st.dataframe(recommender.retailers_data[['name', 'city', 'price_per_gram', 'distance_km']])
     
     with col2:
         st.markdown("### 📊 Quick Stats")
@@ -259,33 +288,42 @@ def main():
     # Generate recommendations
     if st.button("🎯 Get Recommendations", type="primary"):
         with st.spinner("Finding the best gold retailers..."):
-            recommendations = recommender.get_recommendations(user_preferences, gold_quantity)
-            
-            st.markdown("---")
-            st.markdown("### 🏆 Top Recommendations")
-            
-            for i, (idx, retailer) in enumerate(recommendations.iterrows(), 1):
-                with st.container():
-                    col1, col2, col3 = st.columns([2, 1, 1])
-                    
-                    with col1:
-                        st.markdown(f"**#{i} {retailer['name']}**")
-                        st.markdown(f"📍 {retailer['city']} • 🛡️ {retailer['certification']} • ⭐ {retailer['trust_rating']:.1f}")
+            try:
+                recommendations = recommender.get_recommendations(user_preferences, gold_quantity)
+                
+                st.markdown("---")
+                st.markdown("### 🏆 Top Recommendations")
+                
+                for i, (idx, retailer) in enumerate(recommendations.iterrows(), 1):
+                    with st.container():
+                        col1, col2, col3 = st.columns([2, 1, 1])
                         
-                    with col2:
-                        st.markdown(f"**💰 KSH {retailer['price_per_gram']:,.0f}/g**")
-                        st.markdown(f"**📦 {retailer['purchase_capacity_kg']:.1f} kg cap**")
+                        with col1:
+                            st.markdown(f"**#{i} {retailer['name']}**")
+                            st.markdown(f"📍 {retailer['city']} • 🛡️ {retailer['certification']} • ⭐ {retailer['trust_rating']:.1f}")
+                            
+                        with col2:
+                            st.markdown(f"**💰 KSH {retailer['price_per_gram']:,.0f}/g**")
+                            st.markdown(f"**📦 {retailer['purchase_capacity_kg']:.1f} kg cap**")
+                            
+                        with col3:
+                            st.markdown(f"**🚗 {retailer['distance_km']:.0f} km**")
+                            st.markdown(f"**🏢 {retailer['years_in_business']} yrs**")
                         
-                    with col3:
-                        st.markdown(f"**🚗 {retailer['distance_km']:.0f} km**")
-                        st.markdown(f"**🏢 {retailer['years_in_business']} yrs**")
-                    
-                    # Progress bar for score
-                    score_percentage = (retailer['similarity_score'] - recommendations['similarity_score'].min()) / (recommendations['similarity_score'].max() - recommendations['similarity_score'].min()) * 100
-                    st.progress(int(score_percentage))
-                    st.caption(f"Match Score: {retailer['similarity_score']:.2f}")
-                    
-                    st.markdown("---")
+                        # Progress bar for score
+                        min_score = recommendations['similarity_score'].min()
+                        max_score = recommendations['similarity_score'].max()
+                        if max_score > min_score:
+                            score_percentage = (retailer['similarity_score'] - min_score) / (max_score - min_score) * 100
+                        else:
+                            score_percentage = 100
+                            
+                        st.progress(int(score_percentage))
+                        st.caption(f"Match Score: {retailer['similarity_score']:.2f}")
+                        
+                        st.markdown("---")
+            except Exception as e:
+                st.error(f"Error generating recommendations: {str(e)}")
     
     # Additional analysis section
     st.markdown("### 📈 Market Analysis")
@@ -294,35 +332,44 @@ def main():
     
     with col1:
         # Price distribution
-        fig1 = px.histogram(
-            recommender.retailers_data,
-            x='price_per_gram',
-            title='Price Distribution (KSH/g)',
-            nbins=10
-        )
-        st.plotly_chart(fig1, use_container_width=True)
+        try:
+            fig1 = px.histogram(
+                recommender.retailers_data,
+                x='price_per_gram',
+                title='Price Distribution (KSH/g)',
+                nbins=10
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+        except Exception as e:
+            st.error(f"Chart error: {str(e)}")
     
     with col2:
         # Trust rating vs price
-        fig2 = px.scatter(
-            recommender.retailers_data,
-            x='trust_rating',
-            y='price_per_gram',
-            color='certification',
-            title='Trust Rating vs Price',
-            size='purchase_capacity_kg',
-            hover_name='name'
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        try:
+            fig2 = px.scatter(
+                recommender.retailers_data,
+                x='trust_rating',
+                y='price_per_gram',
+                color='certification',
+                title='Trust Rating vs Price',
+                size='purchase_capacity_kg',
+                hover_name='name'
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        except Exception as e:
+            st.error(f"Chart error: {str(e)}")
     
     with col3:
         # Capacity analysis
-        fig3 = px.box(
-            recommender.retailers_data,
-            y='purchase_capacity_kg',
-            title='Purchase Capacity Distribution'
-        )
-        st.plotly_chart(fig3, use_container_width=True)
+        try:
+            fig3 = px.box(
+                recommender.retailers_data,
+                y='purchase_capacity_kg',
+                title='Purchase Capacity Distribution'
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+        except Exception as e:
+            st.error(f"Chart error: {str(e)}")
     
     # Contact and negotiation tips
     with st.expander("💡 Selling Tips & Best Practices"):
